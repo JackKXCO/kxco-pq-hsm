@@ -55,7 +55,8 @@
     "CHANGELOG.md",
     "LICENSE",
     "README.md",
-    "src"
+    "src",
+    "ASSESSMENT.md"
   ],
   "engines": {
     "node": ">=20.19"
@@ -70,7 +71,8 @@
   },
   "scripts": {
     "test": "node --test test/hsm.test.js test/signing-mode.test.js",
-    "test:softhsm": "node --test test/softhsm-integration.test.js"
+    "test:softhsm": "node --test test/softhsm-integration.test.js",
+    "evidence": "node scripts/build-evidence.mjs"
   },
   "funding": "https://kxco.ai",
   "publishConfig": {
