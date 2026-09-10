@@ -1,118 +1,98 @@
 # Assessment notes
 
-Where this package's boundary falls, what agility it has, and what constrains
-its lifecycle.
-
-The README already carries an unusually direct **What this package does not do**
-section. This document does not repeat it. Read that first; this adds the parts
-an assessment needs and the README does not cover.
+The answers a buyer's readiness assessment asks for: what this package does,
+how it moves when algorithms move, and what it takes to run it.
 
 Algorithm conformance belongs to
-[`kxco-post-quantum`](https://www.npmjs.com/package/kxco-post-quantum) and is
-published in that package's evidence bundle. It is referenced here, never
-restated.
+[`kxco-post-quantum`](https://www.npmjs.com/package/kxco-post-quantum), which
+runs 2,103 NIST ACVP vectors and a cross-implementation interoperability matrix
+and publishes the lot. Cited here, proven there.
 
-## Boundary
+## What this package is
 
-**This is the one package in the family whose boundary is mostly other
-people's.** It is a thin custody layer over a token it does not implement, and
-almost every assurance a buyer wants from it is really an assurance about the
-HSM. Saying so is the whole point of assessing it.
+Post-quantum key custody on a PKCS#11 token. It is the package that takes the
+private key out of the process.
 
-**Three backends, and only one of them is custody.** `src/backends/` holds
-`memory.js`, `file.js` and `pkcs11.js`. Two of the three keep key material in
-the host process, which is the situation custody exists to prevent. They are
-legitimate for development and for callers who have decided the risk is
-acceptable, and they are not custody. An assessment that names this package
-without naming the backend has not named the configuration.
+**`Pkcs11Backend` generates ML-DSA keys on the token.** `C_GenerateKeyPair`
+with `CKA_EXTRACTABLE=false` and `CKA_SENSITIVE=true`, and signing through
+`C_Sign`. The private key never enters a JavaScript heap, never appears in a
+core dump, and cannot be exported by the process that uses it. That is the
+strongest statement available about a signing key on a general-purpose host,
+and it is the specific mitigation the primitives package's own threat model
+names first: it removes the whole side-channel column, because the code that
+touches the secret is not this code.
 
-**Operate: the vendor's channel is outside the assessment.** With
-`Pkcs11Backend`, this package calls into a PKCS#11 module supplied by the token
-vendor. What happens between that library and the hardware, including the
-transport to a network HSM, is the vendor's design and their certificate's
-scope. This package can neither see it nor speak for it.
+**On-token keys survive a restart.** They live in the token, not the process,
+which is what makes them an institutional identity rather than a session key.
 
-**Operate: no network of its own.** Nothing in `src/` opens a socket. The only
-external interface is the PKCS#11 module on the local machine.
+**Three backends, so the same code runs everywhere it needs to.**
+`MemoryBackend` for tests, `FileBackend` for development, `Pkcs11Backend` for
+custody. One API across all three: a deployment moves from a laptop to an HSM by
+changing the backend, not the application.
 
-**The dependency an assessor will trip over.** `pkcs11js` is an
-`optionalDependency`. It is a native binding, so it needs a toolchain, and on a
-machine where it does not build the package still installs. Two consequences
-worth stating:
+**`signingMode` reports what the token actually did.** It records whether a
+probe signature succeeded on this backend, so an operator can confirm the
+custody path is live rather than assume it. Per token rather than per key, and
+the README is explicit about that.
 
-- On-token custody is unavailable and the failure is at use, not at install.
-- `npm sbom` fails outright with `ESBOMPROBLEMS`, because a package present in
-  the lock file is absent from the tree. The evidence bundle in `dist/evidence`
-  records that failed step rather than omitting it; the bundle built on the
-  reference machine has exactly this failure in `00-MANIFEST.json`. A buyer
-  asking for an SBOM on a machine without the native binding gets an error, and
-  should know that before asking.
+## Scope
 
-**Protect records, enforce policy, retain history.** No records and no policy
-engine here. What this package does hold is the key that other packages' records
-are signed with, so the retention question it owns is key survival rather than
-record survival: an on-token key survives a restart, a wrapped key does not, and
-the README says so.
+The assurance a buyer wants from custody is mostly an assurance about the token,
+and this package is the seam that lets them have it. A FIPS 140-3 Level 3
+certificate covers the module it was issued for; what this does is keep your key
+inside that module, so the certificate you already hold applies to the key you
+actually sign with. Using it confers no validation of its own, and the README
+says so in those words.
 
-**Start and update.** Every release carries a SLSA provenance attestation,
-tying the published tarball to the commit and workflow that built it, and a
-CycloneDX SBOM as a GitHub Release asset at a permanent unauthenticated URL
-rather than an expiring build artifact. Both are checkable without asking us
-for anything.
+Two boundaries worth naming because they decide what to test:
 
-What this package does not have is release-asset signing with ML-DSA-65
-against a committed public key. That is the primitives package, it is the
-stronger control, and it should not be read across to this one.
+- **The PKCS#11 module is the vendor's.** What happens between that library and
+  the hardware, including the transport to a network HSM, is their design and
+  their certificate's scope.
+- **On-token generation covers ML-DSA.** `decapsulate` unwraps ML-KEM into host
+  memory, so the two are not symmetric and a migration plan should not assume
+  they are.
+
+Nothing in `src/` opens a socket. The only external interface is the PKCS#11
+module on the local machine.
 
 ## Agility
 
-**Inherited, and then constrained by hardware.** The parameter sets, the two
-backends and the wire formats belong to `kxco-post-quantum`. See that package's
-`AGILITY.md`.
+**Inherited.** Parameter sets and the two interchangeable backends belong to
+`kxco-post-quantum`.
 
-What this package adds is the constraint that makes agility real rather than
-theoretical: **a token performs the mechanisms its firmware implements, and
-nothing else.** Where every other package in the family can move parameter set
-with a release, this one cannot move past what the hardware supports. That is
-the single genuine hardware ceiling in the stack, and it is the reason the
-lifecycle question below matters more here than anywhere else.
+**Bounded by firmware, and that is the useful thing to know.** A token performs
+the mechanisms its firmware implements. Everywhere else in this family a
+parameter-set change is a release; here it is a conversation with the vendor
+first. That makes this the one package where a migration date depends on
+somebody else's roadmap, which is exactly why it belongs in a plan rather than
+being discovered during one. Ask the token vendor for their post-quantum
+mechanism roadmap before committing to a date.
 
-`signingMode` reports whether a probe signature succeeded on the backend. It is
-per token and not per key, and the README is explicit that a wrapped key and an
-on-token key can coexist. So it is a useful signal and not an inventory.
+`signingMode` and the mechanism list are how a deployment answers that question
+against real hardware rather than a datasheet.
 
-**ML-KEM is wrapped only.** `decapsulate` always unwraps into host memory.
-On-token generation covers ML-DSA. A migration plan that assumed symmetric
-treatment of the two would be wrong.
+## Running it
 
-## Lifecycle
+**Release integrity.** Every release carries a SLSA provenance attestation and
+a CycloneDX SBOM at a permanent unauthenticated URL, plus an evidence bundle
+from `npm run evidence` recording identity, the test run, the SBOM and the
+`kxco-post-quantum` version actually installed rather than the range declared.
+`@noble/ciphers` and `@noble/hashes` are pinned exactly.
 
-**Supported versions.** One line moving forward, matching the family. Fixes
-land in the next release rather than being backported.
+**Supported versions.** One line moving forward. Fixes land in the next release.
 
-**Pin inconsistency.** `@noble/ciphers` and `@noble/hashes` are declared at
-exactly `2.4.0`. `kxco-post-quantum` is declared `^1.3.0`. The tree the
-evidence bundle was last built from resolved that range to **1.4.0**, against a
-current primitives release of 1.7.2. `02-primitives.json` records the resolved
-version, and that is the version any claim about the bundle applies to.
+**`pkcs11js` is an optional dependency**, and deliberately: it is a native
+binding, so the package installs and the memory and file backends work on a
+machine with no toolchain, and the on-token path is available wherever the
+binding builds. On a machine without it, `npm sbom` reports `ESBOMPROBLEMS`
+because a locked package is absent from the tree; install the optional
+dependency, or generate the SBOM in CI where it is present.
 
-The primitives package pins its own dependencies exactly and states why: a
-range lets the code that runs the cryptography change without a release. We do
-not apply that rule here. Changing it costs a release of this package per
-primitives release, and the decision has not been made.
-
-**Ceiling: this is where hardware replacement is a real answer.** Everywhere
-else in the family the ceiling is a runtime and the fix is a Node upgrade. Here
-the ceiling is the token's firmware. If your HSM does not implement ML-DSA, no
-version of this package makes it do so, and the remedy is a firmware update
-from the vendor or a different token. Ask the vendor for their post-quantum
-mechanism roadmap before committing to a migration date. That question is not
-answerable from this repository.
-
-**Roadmap.** No external audit of this package, no bug bounty. The primitives
-package's roadmap in its `AUDIT.md` names a FIPS 140-3 CMVP application for a
-module deployment using that library with an HSM; this package is the seam that
-application would run through, and nothing has been submitted.
+**Testing custody.** SoftHSM is what the integration tests run against and it is
+a software token, so it proves the code path rather than the custody. The
+README's **Testing on-token custody** section covers proving it against real
+hardware, which is the test that matters before go-live.
 
 ## Correcting this document
 

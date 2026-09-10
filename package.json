@@ -1,6 +1,6 @@
 {
   "name": "kxco-pq-hsm",
-  "version": "1.4.1",
+  "version": "1.4.2",
   "description": "ML-DSA-65 and ML-KEM-768 key custody on a PKCS#11 HSM. Generates ML-DSA keys on the token with CKA_EXTRACTABLE=false and signs with C_Sign, so the private key never enters host memory. signingMode reports on-token only after a probe signature proves it.",
   "keywords": [
     "post-quantum",
